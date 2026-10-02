@@ -1,0 +1,169 @@
+def paletizacao():
+  set_gravity([0.0, 0.0, 9.82])
+  set_tcp(p[0.0,0.0,0.0,0.0,0.0,0.0])
+  set_payload(0.1)
+  timer_total=False
+  timer_caixa=False
+  n_ciclos_total=0
+  n_ciclos_caixa=0
+  cnt_1=0
+  start=False
+  socket_open("192.168.0.100",5000,"pc")
+
+  movm=socket_read_ascii_float(3, "pc", timeout=300)
+  vel = movm[1]
+  acel = movm[2]
+  blend= movm[3]
+
+  layers=socket_read_ascii_float(3, "pc", timeout=300)
+  qtd_layers=layers[1]
+  rows=layers[2]
+  colums=layers[3]
+
+  aprox_z = socket_read_ascii_float(1, "pc", timeout=300)
+
+
+  alturas = socket_read_ascii_float(qtd_layers, "pc", timeout=300)
+  rotacao = socket_read_ascii_float(qtd_layers, "pc", timeout=300)
+  
+
+  cmd=socket_read_line("pc", timeout=300)
+  if cmd=="FIXO":
+    c1 = p[.804109512728, -.170646607479, .001638944400, -.720057501453, 2.949641876232, .016773383741]
+    c2 = p[.788847592809, .431490695657, -.004090053171, -1.681550245638, 2.534192813452, .071248209323]
+    c3 = p[.581129059686, .434567715694, .007032847265, 1.970629842011, -2.444873395160, -.063563397096]
+    c4 = p[.613991377242, -.190147441552, -.011940742562, .669591805873, -2.982470237662, -.098628000846]
+    socket_send_line("Programa começará com pontos já determinados", "pc")
+    start=True
+  elif cmd=="FREEDRIVE":
+    freedrive_mode()
+    popup("Escolha seu corner 1", blocking=True)
+    c1=get_actual_tcp_pose()
+    popup("Escolha seu corner 2", blocking=True)
+    c2=get_actual_tcp_pose()
+    popup("Escolha seu corner 3", blocking=True)
+    c3=get_actual_tcp_pose()
+    popup("Escolha seu corner 4", blocking=True)
+    c4=get_actual_tcp_pose()
+    end_freedrive_mode()
+    socket_send_line("Programa começará com pontos escolhidos por você", "pc")
+    start=True
+  else:
+    socket_send_line("Erro ao receber comando", "pc")
+  end
+
+
+  thread timer():
+    while(True):
+      if(timer_total==True):
+        n_ciclos_total=n_ciclos_total+1
+      end
+
+      if(timer_caixa==True):
+        n_ciclos_caixa=n_ciclos_caixa+1
+      end
+      sync()
+    end
+  end
+  run timer()
+
+ 
+  thread espera_comando():
+    while (start):
+      cmd=socket_read_line("pc", timeout=0)
+      
+      if cmd=="STOP":
+        popup("Emergency stop command received")
+        halt
+      elif cmd=="PAUSE":
+        popup("The program has been paused")
+        pause
+
+      end
+      
+      sync()
+    end
+  end
+  run espera_comando()
+
+  layer_atual=0
+  x=0.1
+  y=0.1
+
+  while (start and (layer_atual<qtd_layers)):
+    altura_z=0
+    timer_total=True
+    n_ciclos_total=0
+    n_ciclos_caixa=0
+
+
+    movej(get_inverse_kin(p[.623815050173, -.584273837099, .136894863163, .099576979158, 3.028506346375, -.049559399784], qnear=[-0.5643013159381312, -2.146048370991842, -1.8368824164019983, -0.6162107626544397, 1.5955325365066528, 1.0737292766571045]), a=0.5, v=0.6,r=blend)
+
+    movep(p[.623795854930, -.584348363161, .047775662215, .099618628210, 3.028388151206, -.049569864244], a=0.1, v=0.15)
+    
+   
+    set_standard_digital_out(1, True)
+    sleep(2.0)
+
+    cont_y= cnt_1%rows
+    cont_x= floor(cnt_1/rows)
+
+
+    p_1= interpolate_pose(c1,c2,cont_y/(rows-1))
+    p_2=interpolate_pose(c3,c4,cont_y/(rows-1))
+
+    
+    pattern_point=interpolate_pose(p_1,p_2,cont_x/(colums-1))
+    
+    if(layer_atual>0):
+      i=2
+      while(i<=(layer_atual+ 1)):
+        altura_z=altura_z+alturas[i]
+        i=i+ 1
+      end
+    end
+
+    eixo_z=p[0,0,-altura_z,0,0,rotacao[layer_atual]]
+    pattern_point=pose_trans(pattern_point, eixo_z)
+
+    if ((cont_x % 2) == 0):
+      y=0.1
+    else:
+      y= -0.1
+    end
+
+    deslocamento=p[x,y,-aprox_z[1],0,0,0]
+
+    timer_caixa=True
+  
+    movel(pose_trans(pattern_point, deslocamento), a=acel, v=vel, r=blend)
+  
+    movel(pattern_point, a=acel, v=vel)
+
+    set_standard_digital_out(0, False)
+
+    sleep(2.0)
+    timer_caixa=False
+    movel(pose_trans(pattern_point, deslocamento), a=acel, v=vel, r=blend)
+    timer_total=False
+    
+    ciclo_total=n_ciclos_total*get_steptime()
+    ciclo_caixa=n_ciclos_caixa*get_steptime()
+    msg1=str_cat("Tempo de ciclo total ",ciclo_total)
+    msg2=str_cat("Tempo de ciclo de uma caixa ", ciclo_caixa)
+
+    socket_send_line(msg1,"pc")
+    socket_send_line(msg2,"pc")
+
+
+    if (cnt_1 >= (rows*colums - 1)):
+      cnt_1 = 0
+      layer_atual=layer_atual+ 1
+    else:
+      cnt_1 = cnt_1 + 1
+    end
+
+  end
+      
+end
+paletizacao()
