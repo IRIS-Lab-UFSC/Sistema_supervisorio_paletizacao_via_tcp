@@ -1,0 +1,1 @@
+# Sistema_supervisorio_paletizacao_via_tcp
